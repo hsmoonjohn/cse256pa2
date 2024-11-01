@@ -39,26 +39,46 @@ class MultiheadSelfAttention(nn.Module):
         out = self.fc_out(out)
         return out
     
-    class TransformerEncoderLayer(nn.Module):
-        def __init__(self, embed_size, num_heads, ff_hidden_dim, dropout=0.1):
-            super(TransformerEncoderLayer, self).__init__()
-            self.attention = MultiheadSelfAttention(embed_size, num_heads)
-            self.norm1 = nn.LayerNorm(embed_size)
-            self.norm2 = nn.LayerNorm(embed_size)
+class TransformerEncoderLayer(nn.Module):
+    def __init__(self, embed_size, num_heads, ff_hidden_dim, dropout=0.1):
+        super(TransformerEncoderLayer, self).__init__()
+        self.attention = MultiheadSelfAttention(embed_size, num_heads)
+        self.norm1 = nn.LayerNorm(embed_size)
+        self.norm2 = nn.LayerNorm(embed_size)
 
-            self.feed_forward = nn.Sequential(
-                nn.Linear(embed_size, ff_hidden_dim),
-                nn.ReLU(),
-                nn.Linear(ff_hidden_dim, embed_size)
-            )
-            self.dropout = nn.Dropout(dropout)
+        self.feed_forward = nn.Sequential(
+            nn.Linear(embed_size, ff_hidden_dim),
+            nn.ReLU(),
+            nn.Linear(ff_hidden_dim, embed_size)
+        )
+        self.dropout = nn.Dropout(dropout)
 
-        def forward(self, value, key, query, mask):
-            attention = self.attention(value, key, query, mask)
+    def forward(self, value, key, query, mask):
+        attention = self.attention(value, key, query, mask)
 
-            # Add skip connection, run through normalization and then apply dropout
-            x = self.dropout(self.norm1(attention + query))
-            forward = self.feed_forward(x)
-            out = self.dropout(self.norm2(forward + x))
-            return out
+        # Add skip connection, run through normalization and then apply dropout
+        x = self.dropout(self.norm1(attention + query))
+        forward = self.feed_forward(x)
+        out = self.dropout(self.norm2(forward + x))
+        return out
+
+class TransformerEncoder(nn.Module):
+    def __init__(self, embed_size, num_layers, num_heads, ff_hidden_dim, dropout, max_length):
+        super(TransformerEncoder, self).__init__()
+        self.word_embedding = nn.Embedding(max_length, embed_size)
+        self.position_embedding = nn.Embedding(max_length, embed_size)
+        self.layers = nn.ModuleList(
+            [TransformerEncoderLayer(embed_size, num_heads, ff_hidden_dim, dropout) for _ in range(num_layers)]
+        )
+        self.dropout = nn.Dropout(dropout)
+
+    def forward(self, x, mask):
+        N, seq_length = x.shape
+        positions = torch.arange(0, seq_length).expand(N, seq_length).to(x.device)
+        out = self.dropout(self.word_embedding(x) + self.position_embedding(positions))
+
+        for layer in self.layers:
+            out = layer(out, mask)
+
+        return out.mean(dim=1)  # Mean pooling over sequence dimension
 
