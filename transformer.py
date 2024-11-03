@@ -3,6 +3,7 @@ import torch
 import torch.nn as nn
 import math
 
+
 class MultiheadSelfAttention(nn.Module):
     def __init__(self, embed_size, num_heads):
         super(MultiheadSelfAttention, self).__init__()
@@ -32,14 +33,19 @@ class MultiheadSelfAttention(nn.Module):
         energy = torch.einsum("nqhd,nkhd->nhqk", [queries, keys])
         if mask is not None:
             energy = energy.masked_fill(mask == 0, float("-1e20"))
-
+        #print("Energy before softmax:", energy)  # Check values before softmax
+        #print("Energy shape before softmax:", energy.shape)
         attention = torch.softmax(energy / (self.embed_size ** (1 / 2)), dim=3)
+        #row_sums = attention.sum(dim=3)  # Sum over the key dimension
+        #print("Row sums after softmax (should be close to 1):", row_sums)
+        #print("Attention after softmax:", attention)  # Check if rows sum to 1  
+        #attention = torch.softmax(energy / (self.embed_size ** (1 / 2)), dim=3)
 
         out = torch.einsum("nhql,nlhd->nqhd", [attention, values]).reshape(N, query_len, self.embed_size)
         out = self.fc_out(out)
 
         if return_attention:
-            return out, attention
+            return out, attention#[:,0,:,:]
         else:
             return out
     
@@ -65,7 +71,7 @@ class TransformerEncoderLayer(nn.Module):
         forward = self.feed_forward(x)
         out = self.dropout(self.norm2(forward + x))
         if return_attention:
-            return out, attention
+            return out, attention#[:,0,:,:]
         else:
             return out
 
@@ -89,12 +95,13 @@ class TransformerEncoder(nn.Module):
         for layer in self.layers:
             if return_attention:
                 out, attention = layer(out, out, out, mask, return_attention)
+                #attention = attention[:,0,:,:]
                 attention_maps.append(attention)
             else:
                 out = layer(out, out, out, mask)
         
         if return_attention:
-            return out, attention_maps
+            return out.mean(dim=1), attention_maps
         else:
             return out.mean(dim=1)  # Mean pooling over sequence dimension
 

@@ -9,7 +9,7 @@ import argparse
 from tokenizer import SimpleTokenizer
 from dataset import SpeechesClassificationDataset, LanguageModelingDataset
 from transformer import TransformerEncoder #, TransformerDecoder, TransformerClassifier
-
+from utilities import Utilities
 seed = 42
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -172,6 +172,11 @@ def main(part):
             train_loss = train(model, train_CLS_loader, optimizer, criterion)
             test_accuracy, test_loss = compute_classifier_accuracy(model, test_CLS_loader, criterion)
             print(f"Epoch {epoch+1}/{epochs_CLS}, Train Loss: {train_loss:.4f}, Test Loss: {test_loss:.4f}, Test Accuracy: {test_accuracy:.2f}%")
+        # Initialize Utilities and run sanity check
+        utilities = Utilities(tokenizer, model)
+        sample_sentence = "This is a sample sentence to visualize attention maps."
+        utilities.sanity_check(sample_sentence, block_size=32)
+
 
     elif part == "part2":
 

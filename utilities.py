@@ -2,6 +2,11 @@
 import matplotlib.pyplot as plt
 import torch
 
+
+def create_mask(x):
+    """Creates a mask to ignore padding tokens in the input sequence."""
+    return (x != 0).unsqueeze(1).unsqueeze(2)  # Shape: (batch_size, 1, 1, seq_length)
+
 class Utilities:
     def __init__(self, tokenizer, model):
         self.tokenizer = tokenizer
@@ -19,8 +24,8 @@ class Utilities:
         print("Input tensor shape:", input_tensor.shape)
 
         # Process the input tensor through the encoder model
-        _,  attn_maps = self.model(input_tensor) # Ignore the output of the model, and only get the attention maps; make sure your encoder returns the attention maps
-
+        #_,  attn_maps = self.model(input_tensor) # Ignore the output of the model, and only get the attention maps; make sure your encoder returns the attention maps
+        output, attn_maps = self.model.encoder(input_tensor, create_mask(input_tensor), return_attention=True)
         # Display the number of attention maps
         print("Number of attention maps:", len(attn_maps))
 
@@ -30,9 +35,11 @@ class Utilities:
 
             # Check if the attention probabilities sum to 1 over rows
             total_prob_over_rows = torch.sum(attn_map[0], dim=1)
+
             if torch.any(total_prob_over_rows < 0.99) or torch.any(total_prob_over_rows > 1.01):
                 print("Failed normalization test: probabilities do not sum to 1.0 over rows")
-                print("Total probability over rows:", total_prob_over_rows.numpy())
+                #print("Total probability over rows:", total_prob_over_rows.numpy())
+                print("Total probability over rows:", total_prob_over_rows.detach().cpu().numpy())
 
             # Create a heatmap of the attention map
             fig, ax = plt.subplots()
@@ -45,7 +52,7 @@ class Utilities:
             plt.savefig(f"attention_map_{j + 1}.png")
             
             # Show the plot
-            plt.show()
+            #plt.show()
             
 
 
