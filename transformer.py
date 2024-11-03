@@ -62,10 +62,10 @@ class TransformerEncoderLayer(nn.Module):
         out = self.dropout(self.norm2(forward + x))
         return out
 
-class TransformerEncoder(nn.Module):
-    def __init__(self, embed_size, num_layers, num_heads, ff_hidden_dim, dropout, max_length):
+""" class TransformerEncoder(nn.Module):
+    def __init__(self, embed_size, num_layers, num_heads, ff_hidden_dim, dropout, vocab_size, max_length):
         super(TransformerEncoder, self).__init__()
-        self.word_embedding = nn.Embedding(max_length, embed_size)
+        self.word_embedding = nn.Embedding(vocab_size, embed_size)
         self.position_embedding = nn.Embedding(max_length, embed_size)
         self.layers = nn.ModuleList(
             [TransformerEncoderLayer(embed_size, num_heads, ff_hidden_dim, dropout) for _ in range(num_layers)]
@@ -80,5 +80,27 @@ class TransformerEncoder(nn.Module):
         for layer in self.layers:
             out = layer(out, mask)
 
+        return out.mean(dim=1)  # Mean pooling over sequence dimension """
+
+class TransformerEncoder(nn.Module):
+    def __init__(self, vocab_size, embed_size, num_layers, num_heads, ff_hidden_dim, dropout, max_length):
+        super(TransformerEncoder, self).__init__()
+        self.word_embedding = nn.Embedding(vocab_size, embed_size)
+        self.position_embedding = nn.Embedding(max_length, embed_size)
+        self.layers = nn.ModuleList(
+            [TransformerEncoderLayer(embed_size, num_heads, ff_hidden_dim, dropout) for _ in range(num_layers)]
+        )
+        self.dropout = nn.Dropout(dropout)
+
+    def forward(self, x, mask):
+        N, seq_length = x.shape
+        positions = torch.arange(0, seq_length).expand(N, seq_length).to(x.device)
+        out = self.dropout(self.word_embedding(x) + self.position_embedding(positions))
+
+        # Pass `out` as value, key, and query for self-attention in each layer
+        for layer in self.layers:
+            out = layer(out, out, out, mask)
+
         return out.mean(dim=1)  # Mean pooling over sequence dimension
+
 

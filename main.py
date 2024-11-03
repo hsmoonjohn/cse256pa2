@@ -2,15 +2,18 @@ import torch
 from torch.utils.data import DataLoader
 from torch.nn.utils.rnn import pad_sequence
 import os
+import torch.nn as nn
+import torch.optim as optim
+import argparse
 
 from tokenizer import SimpleTokenizer
 from dataset import SpeechesClassificationDataset, LanguageModelingDataset
-
+from transformer import TransformerEncoder #, TransformerDecoder, TransformerClassifier
 
 seed = 42
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
+    
 """ Hyperparameters to use for training to roughly match 
 the numbers mentioned in the assignment description """
 batch_size = 16  # Number of independent sequences  we will process in parallel
@@ -33,6 +36,46 @@ n_input = 64  # Input size for the classifier, should match the embedding size o
 n_hidden = 100  # Hidden size for the classifier
 n_output = 3  # Output size for the classifier, we have 3 classes
 epochs_CLS = 15 # epochs for classifier training
+
+class TransformerClassificationModel(nn.Module):
+    def __init__(self, encoder, classifier):
+        super(TransformerClassificationModel, self).__init__()
+        self.encoder = encoder
+        self.classifier = classifier
+
+    def forward(self, x, mask):
+        encoded_output = self.encoder(x, mask)
+        return self.classifier(encoded_output)
+
+class Classifier(nn.Module):
+    def __init__(self, embed_size, num_classes):
+        super(Classifier, self).__init__()
+        self.fc1 = nn.Linear(embed_size, 100)
+        self.fc2 = nn.Linear(100, num_classes)
+
+    def forward(self, x):
+        x = torch.relu(self.fc1(x))
+        x = self.fc2(x)
+        return x
+    
+def train(model, data_loader, optimizer, criterion):
+    model.train()
+    total_loss = 0
+    for X, Y in data_loader:
+        X, Y = X.to(device), Y.to(device)
+        mask = create_mask(X)
+        optimizer.zero_grad()
+        outputs = model(X, mask)
+        loss = criterion(outputs, Y)
+        loss.backward()
+        optimizer.step()
+        total_loss += loss.item()
+    return total_loss / len(data_loader)
+
+
+def create_mask(x):
+    """Creates a mask to ignore padding tokens in the input sequence."""
+    return (x != 0).unsqueeze(1).unsqueeze(2)  # Shape: (batch_size, 1, 1, seq_length)
 
 def load_texts(directory):
     """
@@ -61,21 +104,26 @@ def collate_batch(batch):
     labels = torch.stack(labels)  
     return padded_sequences, labels
 
-def compute_classifier_accuracy(classifier, data_loader):
+def compute_classifier_accuracy(classifier, data_loader, criterion):
     """ Compute the accuracy of the classifier on the data in data_loader."""
     classifier.eval()
     total_correct = 0
     total_samples = 0
+    total_loss = 0
     with torch.no_grad():
         for X, Y in data_loader:
             X, Y = X.to(device), Y.to(device)
-            outputs = classifier(X)
+            mask = create_mask(X)
+            outputs = classifier(X, mask)
+            loss = criterion(outputs, Y)  # Compute loss for this batch
+            total_loss += loss.item()  # Accumulate loss
             _, predicted = torch.max(outputs.data, 1)
             total_correct += (predicted == Y).sum().item()
             total_samples += Y.size(0)
         accuracy = (100 * total_correct / total_samples)
+        avg_loss = total_loss / len(data_loader)
         classifier.train()
-        return accuracy
+        return accuracy, avg_loss
 
 
 def compute_perplexity(decoderLMmodel, data_loader, eval_iters=100):
@@ -99,42 +147,58 @@ def compute_perplexity(decoderLMmodel, data_loader, eval_iters=100):
     decoderLMmodel.train()
     return perplexity
 
-def main():
+def main(part):
 
     print("Loading data and creating tokenizer ...")
     texts = load_texts('speechesdataset')
     tokenizer = SimpleTokenizer(' '.join(texts)) # create a tokenizer from the data
     print("Vocabulary size is", tokenizer.vocab_size)
 
-    train_CLS_dataset = SpeechesClassificationDataset(tokenizer, "speechesdataset/train_CLS.tsv")
-    train_CLS_loader = DataLoader(train_CLS_dataset, batch_size=batch_size,collate_fn=collate_batch,shuffle=True)
+    if part == "part1":
+
+        train_CLS_dataset = SpeechesClassificationDataset(tokenizer, "speechesdataset/train_CLS.tsv")
+        train_CLS_loader = DataLoader(train_CLS_dataset, batch_size=batch_size,collate_fn=collate_batch,shuffle=True)
+        test_CLS_dataset = SpeechesClassificationDataset(tokenizer, "speechesdataset/test_CLS.tsv")
+        test_CLS_loader = DataLoader(test_CLS_dataset, batch_size=batch_size, collate_fn=collate_batch, shuffle=False)
+
+        encoder = TransformerEncoder(embed_size=n_embd, num_layers=n_layer, num_heads=n_head, ff_hidden_dim=n_hidden, dropout=0.1, max_length=block_size, vocab_size=tokenizer.vocab_size).to(device)
+        classifier = Classifier(n_embd, n_output).to(device)
+        model = TransformerClassificationModel(encoder, classifier).to(device)
+
+        optimizer = optim.Adam(model.parameters(), lr=learning_rate)
+        criterion = nn.CrossEntropyLoss()
+        print("Starting classification training...")
+        for epoch in range(epochs_CLS):
+            train_loss = train(model, train_CLS_loader, optimizer, criterion)
+            test_accuracy, test_loss = compute_classifier_accuracy(model, test_CLS_loader, criterion)
+            print(f"Epoch {epoch+1}/{epochs_CLS}, Train Loss: {train_loss:.4f}, Test Loss: {test_loss:.4f}, Test Accuracy: {test_accuracy:.2f}%")
+
+    elif part == "part2":
 
   
-    inputfile = "speechesdataset/train_LM.txt"
-    with open(inputfile, 'r', encoding='utf-8') as f:
-        lmtrainText = f.read()
-    train_LM_dataset = LanguageModelingDataset(tokenizer, lmtrainText,  block_size)
-    train_LM_loader = DataLoader(train_LM_dataset, batch_size=batch_size, shuffle=True)
+        inputfile = "speechesdataset/train_LM.txt"
+        with open(inputfile, 'r', encoding='utf-8') as f:
+            lmtrainText = f.read()
+        train_LM_dataset = LanguageModelingDataset(tokenizer, lmtrainText,  block_size)
+        train_LM_loader = DataLoader(train_LM_dataset, batch_size=batch_size, shuffle=True)
 
-     # for the classification  task, you will train for a fixed number of epochs like this:
+        # for the classification  task, you will train for a fixed number of epochs like this:
 
-    for epoch in range(epochs_CLS):
-        for xb, yb in train_CLS_loader:
+
+        # for the language modeling task, you will iterate over the training data for a fixed number of iterations like this:
+        for i, (xb, yb) in enumerate(train_LM_loader):
+            if i >= max_iters:
+                break
             xb, yb = xb.to(device), yb.to(device)
-
-            # CLS training code here
-
-
-    # for the language modeling task, you will iterate over the training data for a fixed number of iterations like this:
-    for i, (xb, yb) in enumerate(train_LM_loader):
-        if i >= max_iters:
-            break
-        xb, yb = xb.to(device), yb.to(device)
-        # LM training code here
+            # LM training code here
 
     
 
 
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser(description="Run specified part of the assignment")
+    parser.add_argument('--part', type=str, choices=['part1', 'part2', 'part3'], required=True, help="Specify which part to run: 'part1' or 'part2' or 'part3'")
+    args = parser.parse_args()
+    
+    main(args.part)
