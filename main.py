@@ -37,6 +37,9 @@ n_hidden = 100  # Hidden size for the classifier
 n_output = 3  # Output size for the classifier, we have 3 classes
 epochs_CLS = 15 # epochs for classifier training
 
+def count_parameters(model):
+    return sum(p.numel() for p in model.parameters() if p.requires_grad)
+
 class TransformerClassificationModel(nn.Module):
     def __init__(self, encoder, classifier):
         super(TransformerClassificationModel, self).__init__()
@@ -176,6 +179,8 @@ def main(part):
         utilities = Utilities(tokenizer, model)
         sample_sentence = "This is a sample sentence to visualize attention maps, which is intentionally made around 32 words to see if the attention map works properly."
         utilities.sanity_check(sample_sentence, block_size=32)
+        num_params = count_parameters(encoder)
+        print(f"Number of trainable parameters in the TransformerEncoder: {num_params}")
 
 
     elif part == "part2":
