@@ -36,16 +36,13 @@ class MultiheadSelfAttention(nn.Module):
         #print("Energy before softmax:", energy)  # Check values before softmax
         #print("Energy shape before softmax:", energy.shape)
         attention = torch.softmax(energy / (self.embed_size ** (1 / 2)), dim=3)
-        #row_sums = attention.sum(dim=3)  # Sum over the key dimension
-        #print("Row sums after softmax (should be close to 1):", row_sums)
-        #print("Attention after softmax:", attention)  # Check if rows sum to 1  
-        #attention = torch.softmax(energy / (self.embed_size ** (1 / 2)), dim=3)
-
+        
+        #print(f"Attention shape after softmax: {attention.shape}")
         out = torch.einsum("nhql,nlhd->nqhd", [attention, values]).reshape(N, query_len, self.embed_size)
         out = self.fc_out(out)
 
         if return_attention:
-            return out, attention#[:,0,:,:]
+            return out, attention
         else:
             return out
     
@@ -64,17 +61,20 @@ class TransformerEncoderLayer(nn.Module):
         self.dropout = nn.Dropout(dropout)
 
     def forward(self, value, key, query, mask, return_attention=False):
-        attention = self.attention(value, key, query, mask)
 
-        # Add skip connection, run through normalization and then apply dropout
-        x = self.dropout(self.norm1(attention + query))
-        forward = self.feed_forward(x)
-        out = self.dropout(self.norm2(forward + x))
         if return_attention:
-            return out, attention#[:,0,:,:]
-        else:
-            return out
+            attention_out, attention = self.attention(value, key, query, mask, return_attention=True)
+            x = self.dropout(self.norm1(attention_out + query))
+            forward = self.feed_forward(x)
+            out = self.dropout(self.norm2(forward + x))
+            return out, attention
 
+        else:
+            attention = self.attention(value, key, query, mask)
+            x = self.dropout(self.norm1(attention + query))
+            forward = self.feed_forward(x)
+            out = self.dropout(self.norm2(forward + x))
+            return out
 
 class TransformerEncoder(nn.Module):
     def __init__(self, vocab_size, embed_size, num_layers, num_heads, ff_hidden_dim, dropout, max_length):
@@ -95,7 +95,8 @@ class TransformerEncoder(nn.Module):
         for layer in self.layers:
             if return_attention:
                 out, attention = layer(out, out, out, mask, return_attention)
-                #attention = attention[:,0,:,:]
+                #print(attention)
+                #print(attention.shape)
                 attention_maps.append(attention)
             else:
                 out = layer(out, out, out, mask)

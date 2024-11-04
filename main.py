@@ -174,7 +174,7 @@ def main(part):
             print(f"Epoch {epoch+1}/{epochs_CLS}, Train Loss: {train_loss:.4f}, Test Loss: {test_loss:.4f}, Test Accuracy: {test_accuracy:.2f}%")
         # Initialize Utilities and run sanity check
         utilities = Utilities(tokenizer, model)
-        sample_sentence = "This is a sample sentence to visualize attention maps."
+        sample_sentence = "This is a sample sentence to visualize attention maps, which is intentionally made around 32 words to see if the attention map works properly."
         utilities.sanity_check(sample_sentence, block_size=32)
 
 
