@@ -8,7 +8,7 @@ import argparse
 
 from tokenizer import SimpleTokenizer
 from dataset import SpeechesClassificationDataset, LanguageModelingDataset
-from transformer import TransformerEncoder #, TransformerDecoder, TransformerClassifier
+from transformer import TransformerEncoder, TransformerDecoder
 from utilities import Utilities
 seed = 42
 
@@ -39,6 +39,12 @@ epochs_CLS = 15 # epochs for classifier training
 
 def count_parameters(model):
     return sum(p.numel() for p in model.parameters() if p.requires_grad)
+
+# Function to create target mask for the decoder (prevents peeking at future tokens)
+def create_target_mask(seq):
+    seq_len = seq.size(1)
+    mask = torch.tril(torch.ones((seq_len, seq_len), device=seq.device)).unsqueeze(0).unsqueeze(0)
+    return mask  # Shape: (1, 1, seq_len, seq_len)
 
 class TransformerClassificationModel(nn.Module):
     def __init__(self, encoder, classifier):
@@ -191,16 +197,43 @@ def main(part):
             lmtrainText = f.read()
         train_LM_dataset = LanguageModelingDataset(tokenizer, lmtrainText,  block_size)
         train_LM_loader = DataLoader(train_LM_dataset, batch_size=batch_size, shuffle=True)
-
-        # for the classification  task, you will train for a fixed number of epochs like this:
-
-
+        vocab_size = tokenizer.vocab_size
+        decoder = TransformerDecoder(vocab_size=vocab_size, embed_size=n_embd, num_layers=n_layer, num_heads=n_head, 
+                                     ff_hidden_dim=n_hidden, dropout=0.1, max_length=block_size).to(device)
+        optimizer = torch.optim.Adam(decoder.parameters(), lr=learning_rate)
+        criterion = nn.CrossEntropyLoss()
+        print("Starting decoder pretraining on language modeling task...")
+        train_losses = []
         # for the language modeling task, you will iterate over the training data for a fixed number of iterations like this:
         for i, (xb, yb) in enumerate(train_LM_loader):
             if i >= max_iters:
                 break
+            # Move data to device
             xb, yb = xb.to(device), yb.to(device)
-            # LM training code here
+
+            # Generate target mask for the current batch
+            trg_mask = create_target_mask(xb)
+
+            # Forward pass through the model
+            outputs = model(xb, trg_mask=trg_mask)  # Shape: (batch_size, seq_length, vocab_size)
+
+            # Reshape outputs and targets for loss calculation
+            loss = criterion(outputs.view(-1, vocab_size), yb.view(-1))
+
+            # Backpropagation
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+
+            train_losses.append(loss.item())
+
+            # Print training progress and evaluate perplexity at intervals
+            if (i + 1) % eval_interval == 0 or i == max_iters - 1:
+                avg_loss = sum(train_losses[-eval_interval:]) / len(train_losses[-eval_interval:])
+                perplexity = torch.exp(torch.tensor(avg_loss))
+                print(f"Iteration {i + 1}/{max_iters} - Training Loss: {avg_loss:.4f} - Perplexity: {perplexity:.2f}")
+
+        print("Training complete.")
 
     
 
