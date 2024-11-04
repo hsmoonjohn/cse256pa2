@@ -186,6 +186,7 @@ class TransformerDecoder(nn.Module):
             [TransformerDecoderLayer(embed_size, num_heads, ff_hidden_dim, dropout) for _ in range(num_layers)]
         )
         self.fc_out = nn.Linear(embed_size, vocab_size)
+        self.norm = nn.LayerNorm(embed_size)  # Additional normalization
         self.dropout = nn.Dropout(dropout)
 
     def forward(self, x, trg_mask, return_attention=False):
@@ -200,7 +201,8 @@ class TransformerDecoder(nn.Module):
                 attention_maps.append(attention)
             else:
                 out = layer(out, trg_mask)
-        
+            
+        out = self.norm(out)  # Apply LayerNorm here for lower perplexity
         out = self.fc_out(out)
         if return_attention:
             return out, attention_maps
