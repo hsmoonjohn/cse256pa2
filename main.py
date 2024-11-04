@@ -215,7 +215,7 @@ def main(part):
             trg_mask = create_target_mask(xb)
 
             # Forward pass through the model
-            outputs = model(xb, trg_mask=trg_mask)  # Shape: (batch_size, seq_length, vocab_size)
+            outputs = decoder(xb, trg_mask=trg_mask)  # Shape: (batch_size, seq_length, vocab_size)
 
             # Reshape outputs and targets for loss calculation
             loss = criterion(outputs.view(-1, vocab_size), yb.view(-1))
@@ -232,6 +232,9 @@ def main(part):
                 avg_loss = sum(train_losses[-eval_interval:]) / len(train_losses[-eval_interval:])
                 perplexity = torch.exp(torch.tensor(avg_loss))
                 print(f"Iteration {i + 1}/{max_iters} - Training Loss: {avg_loss:.4f} - Perplexity: {perplexity:.2f}")
+        utilities = Utilities(tokenizer, decoder)
+        sample_sentence = "This is a sample sentence to visualize attention maps, which is intentionally made around 32 words to see if the attention map works properly."
+        utilities.sanity_check(sample_sentence, block_size=32, part1=False)
 
         print("Training complete.")
 
