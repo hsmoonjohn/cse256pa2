@@ -472,9 +472,12 @@ def main(part):
         decoder = TransformerDecoder_Alibi(vocab_size=vocab_size, embed_size=generate_embd, num_layers=generate_layer, num_heads=generate_head, 
                                      ff_hidden_dim=generate_hidden, dropout=0.2, max_length=generate_max_length).to(device)
         model_path = "decoder_model.pth"
-        decoder.load_state_dict(torch.load(model_path))
+        if torch.cuda.is_available():
+            decoder.load_state_dict(torch.load(model_path))
+        else:
+            decoder.load_state_dict(torch.load(model_path, map_location=torch.device('cpu')))
         decoder.eval()
-        start_sequence = torch.tensor(tokenizer.encode('hero'), dtype=torch.long).unsqueeze(0).to(device)
+        start_sequence = torch.tensor(tokenizer.encode('What'), dtype=torch.long).unsqueeze(0).to(device)
         generated = generate_text(decoder, start_sequence, max_length=generate_max_length, device=device)
         generated_text = tokenizer.decode(generated[0].tolist())
         print("Generated text:", generated_text)
