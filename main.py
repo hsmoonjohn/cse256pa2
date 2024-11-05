@@ -8,7 +8,7 @@ import argparse
 
 from tokenizer import SimpleTokenizer
 from dataset import SpeechesClassificationDataset, LanguageModelingDataset
-from transformer import TransformerEncoder, TransformerDecoder
+from transformer import TransformerEncoder, TransformerDecoder, TransformerDecoder_Alibi
 from utilities import Utilities
 seed = 42
 
@@ -185,6 +185,34 @@ def compute_perplexity_dev(decoderLMmodel, data_loader, criterion, eval_iters=10
     decoderLMmodel.train()  # Switch back to training mode
     return perplexity
 
+def generate_text(decoder, start_sequence, max_length=50, device='cpu'):
+    # Start with initial sequence
+    decoder.eval()  # Set decoder to evaluation mode
+    generated_sequence = start_sequence.to(device)
+    trg_mask = create_target_mask(generated_sequence).to(device)
+    
+    for _ in range(max_length):
+        # Get predictions for the current sequence
+        with torch.no_grad():
+            print("Generated sequence shape:", generated_sequence.shape)
+            logits = decoder(generated_sequence, trg_mask=trg_mask)
+        
+        # Get the latest predictions for the last token in the sequence
+        next_token_logits = logits[:, -1, :]  # Shape: (batch_size, vocab_size)
+        next_token = torch.argmax(next_token_logits, dim=-1).unsqueeze(1)  # Shape: (batch_size, 1)
+        
+        # Append next token to the sequence
+        generated_sequence = torch.cat((generated_sequence, next_token), dim=1)
+        
+        # Update trg_mask
+        trg_mask = create_target_mask(generated_sequence).to(device)
+        
+        # Check if the model generated an end-of-sequence token
+        #if next_token.item() == decoder.end_token_id:  # Define end_token_id in your model
+        #    break
+
+    return generated_sequence
+
 def main(part):
 
     print("Loading data and creating tokenizer ...")
@@ -289,9 +317,146 @@ def main(part):
         print(f"At 500th iteration, Obama Perplexity: {obama_perplexity:.2f}, H. Bush Perplexity: {hbush_perplexity:.2f}, W. Bush Perplexity: {wbush_perplexity:.2f}")
         utilities = Utilities(tokenizer, decoder)
         sample_sentence = "This is a sample sentence to visualize attention maps, which is intentionally made around 32 words to see if the attention map works properly."
-        utilities.sanity_check(sample_sentence, block_size=32, part1=False)
+        utilities.sanity_check(sample_sentence, block_size=32, part='part2')
 
         print("Training complete.")
+
+
+    elif part == "part3":
+
+  
+        inputfile = "speechesdataset/train_LM.txt"
+        with open(inputfile, 'r', encoding='utf-8') as f:
+            lmtrainText = f.read()
+        train_LM_dataset = LanguageModelingDataset(tokenizer, lmtrainText,  block_size)
+        train_LM_loader = DataLoader(train_LM_dataset, batch_size=batch_size, shuffle=True)
+        
+        obamafile = "speechesdataset/test_LM_obama.txt"
+        with open(obamafile, 'r', encoding='utf-8') as f:
+            lmobamaText = f.read()
+        obama_LM_dataset = LanguageModelingDataset(tokenizer, lmobamaText, block_size)
+        obama_LM_loader = DataLoader(obama_LM_dataset, batch_size=batch_size, shuffle=True)
+
+        hbushfile = "speechesdataset/test_LM_hbush.txt"
+        with open(hbushfile, 'r', encoding='utf-8') as f:
+            lmhbushText = f.read()
+        hbush_LM_dataset = LanguageModelingDataset(tokenizer, lmhbushText, block_size)
+        hbush_LM_loader = DataLoader(hbush_LM_dataset, batch_size=batch_size, shuffle=True)
+
+        wbushfile = "speechesdataset/test_LM_wbush.txt"
+        with open(wbushfile, 'r', encoding='utf-8') as f:
+            lmwbushText = f.read()
+        wbush_LM_dataset = LanguageModelingDataset(tokenizer, lmwbushText, block_size)
+        wbush_LM_loader = DataLoader(wbush_LM_dataset, batch_size=batch_size, shuffle=True)
+
+        vocab_size = tokenizer.vocab_size
+        decoder = TransformerDecoder_Alibi(vocab_size=vocab_size, embed_size=n_embd, num_layers=n_layer, num_heads=n_head, 
+                                     ff_hidden_dim=n_hidden, dropout=0.04, max_length=block_size).to(device)
+        optimizer = torch.optim.Adam(decoder.parameters(), lr=learning_rate)
+        criterion = nn.CrossEntropyLoss()
+        print("Starting decoder pretraining on language modeling task...")
+        train_losses = []
+        # for the language modeling task, you will iterate over the training data for a fixed number of iterations like this:
+        for i, (xb, yb) in enumerate(train_LM_loader):
+            if i >= max_iters:
+                break
+            # Move data to device
+            xb, yb = xb.to(device), yb.to(device)
+
+            # Generate target mask for the current batch
+            trg_mask = create_target_mask(xb)
+
+            # Forward pass through the model
+            outputs = decoder(xb, trg_mask=trg_mask)  # Shape: (batch_size, seq_length, vocab_size)
+
+            # Reshape outputs and targets for loss calculation
+            loss = criterion(outputs.view(-1, vocab_size), yb.view(-1))
+
+            # Backpropagation
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+
+            train_losses.append(loss.item())
+
+            # Print training progress and evaluate perplexity at intervals
+            if (i + 1) % eval_interval == 0 or i == max_iters - 1:
+                avg_loss = sum(train_losses[-eval_interval:]) / len(train_losses[-eval_interval:])
+                current_loss = train_losses[-1]
+                perplexity = compute_perplexity_dev(decoder, train_LM_loader, criterion, eval_iters=eval_iters)
+                print(f"Iteration {i + 1}/{max_iters} - Training Loss: {current_loss:.4f} - Perplexity: {perplexity:.2f}")
+        final_perplexity = compute_perplexity_dev(decoder, train_LM_loader, criterion, eval_iters=eval_iters)
+        obama_perplexity = compute_perplexity_dev(decoder, obama_LM_loader, criterion, eval_iters=eval_iters)
+        hbush_perplexity = compute_perplexity_dev(decoder, hbush_LM_loader, criterion, eval_iters=eval_iters)
+        wbush_perplexity = compute_perplexity_dev(decoder, wbush_LM_loader, criterion, eval_iters=eval_iters)
+        print(f"Final Train Perplexity: {final_perplexity:.2f}")
+        print(f"At 500th iteration, Obama Perplexity: {obama_perplexity:.2f}, H. Bush Perplexity: {hbush_perplexity:.2f}, W. Bush Perplexity: {wbush_perplexity:.2f}")
+        utilities = Utilities(tokenizer, decoder)
+        sample_sentence = "This is a sample sentence to visualize attention maps, which is intentionally made around 32 words to see if the attention map works properly."
+        utilities.sanity_check(sample_sentence, block_size=32, part='part3')
+
+        print("Training complete.")
+
+    elif part == "generation":
+        
+        generate_embd = 128
+        generate_layer = 8
+        generate_head = 8
+        generate_hidden = 256
+        generate_max_length = 50
+        generate_max_iters = 1000
+
+        inputfile = "speechesdataset/train_LM.txt"
+        with open(inputfile, 'r', encoding='utf-8') as f:
+            lmtrainText = f.read()
+        train_LM_dataset = LanguageModelingDataset(tokenizer, lmtrainText,  generate_max_length)
+        train_LM_loader = DataLoader(train_LM_dataset, batch_size=batch_size, shuffle=True)
+
+        vocab_size = tokenizer.vocab_size
+        decoder = TransformerDecoder_Alibi(vocab_size=vocab_size, embed_size=generate_embd, num_layers=generate_layer, num_heads=generate_head, 
+                                     ff_hidden_dim=generate_hidden, dropout=0.04, max_length=generate_max_length).to(device)
+        optimizer = torch.optim.Adam(decoder.parameters(), lr=learning_rate, weight_decay=1e-5)
+        criterion = nn.CrossEntropyLoss()
+        print("Starting decoder pretraining on language modeling task...")
+        train_losses = []
+        # for the language modeling task, you will iterate over the training data for a fixed number of iterations like this:
+        for i, (xb, yb) in enumerate(train_LM_loader):
+            if i >= generate_max_iters:
+                break
+            # Move data to device
+            xb, yb = xb.to(device), yb.to(device)
+
+            # Generate target mask for the current batch
+            trg_mask = create_target_mask(xb)
+
+            # Forward pass through the model
+            outputs = decoder(xb, trg_mask=trg_mask)  # Shape: (batch_size, seq_length, vocab_size)
+
+            # Reshape outputs and targets for loss calculation
+            loss = criterion(outputs.view(-1, vocab_size), yb.view(-1))
+
+            # Backpropagation
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+
+            train_losses.append(loss.item())
+
+            # Print training progress and evaluate perplexity at intervals
+            if (i + 1) % eval_interval == 0 or i == generate_max_iters - 1:
+                avg_loss = sum(train_losses[-eval_interval:]) / len(train_losses[-eval_interval:])
+                current_loss = train_losses[-1]
+                perplexity = compute_perplexity_dev(decoder, train_LM_loader, criterion, eval_iters=eval_iters)
+                print(f"Iteration {i + 1}/{generate_max_iters} - Training Loss: {current_loss:.4f} - Perplexity: {perplexity:.2f}")
+
+    #start_sequence = torch.tensor([tokenizer.encode('I')], dtype=torch.long).unsqueeze(0).to(device)
+    start_sequence = torch.tensor(tokenizer.encode('Here'), dtype=torch.long).unsqueeze(0).to(device)
+
+    #start_sequence = start_sequence.squeeze()
+    generated = generate_text(decoder, start_sequence, max_length=generate_max_length, device=device)
+    generated_text = tokenizer.decode(generated[0].tolist())
+    print("Generated text:", generated_text)    
+
 
     
 
@@ -299,7 +464,7 @@ def main(part):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run specified part of the assignment")
-    parser.add_argument('--part', type=str, choices=['part1', 'part2', 'part3'], required=True, help="Specify which part to run: 'part1' or 'part2' or 'part3'")
+    parser.add_argument('--part', type=str, choices=['part1', 'part2', 'part3', 'generation'], required=True, help="Specify which part to run: 'part1' or 'part2' or 'part3'")
     args = parser.parse_args()
     
     main(args.part)
