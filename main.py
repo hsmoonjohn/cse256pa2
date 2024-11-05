@@ -194,7 +194,7 @@ def generate_text(decoder, start_sequence, max_length=50, device='cpu'):
     for _ in range(max_length):
         # Get predictions for the current sequence
         with torch.no_grad():
-            print("Generated sequence shape:", generated_sequence.shape)
+            #print("Generated sequence shape:", generated_sequence.shape)
             logits = decoder(generated_sequence, trg_mask=trg_mask)
         
         # Get the latest predictions for the last token in the sequence
@@ -399,11 +399,11 @@ def main(part):
 
     elif part == "generation":
         
-        generate_embd = 128
-        generate_layer = 8
+        generate_embd = 256
+        generate_layer = 16
         generate_head = 8
         generate_hidden = 256
-        generate_max_length = 50
+        generate_max_length = 60
         generate_max_iters = 1000
 
         inputfile = "speechesdataset/train_LM.txt"
@@ -414,7 +414,7 @@ def main(part):
 
         vocab_size = tokenizer.vocab_size
         decoder = TransformerDecoder_Alibi(vocab_size=vocab_size, embed_size=generate_embd, num_layers=generate_layer, num_heads=generate_head, 
-                                     ff_hidden_dim=generate_hidden, dropout=0.04, max_length=generate_max_length).to(device)
+                                     ff_hidden_dim=generate_hidden, dropout=0.2, max_length=generate_max_length).to(device)
         optimizer = torch.optim.Adam(decoder.parameters(), lr=learning_rate, weight_decay=1e-5)
         criterion = nn.CrossEntropyLoss()
         print("Starting decoder pretraining on language modeling task...")
@@ -449,13 +449,37 @@ def main(part):
                 perplexity = compute_perplexity_dev(decoder, train_LM_loader, criterion, eval_iters=eval_iters)
                 print(f"Iteration {i + 1}/{generate_max_iters} - Training Loss: {current_loss:.4f} - Perplexity: {perplexity:.2f}")
 
-    #start_sequence = torch.tensor([tokenizer.encode('I')], dtype=torch.long).unsqueeze(0).to(device)
-    start_sequence = torch.tensor(tokenizer.encode('Here'), dtype=torch.long).unsqueeze(0).to(device)
+        #start_sequence = torch.tensor([tokenizer.encode('I')], dtype=torch.long).unsqueeze(0).to(device)
+        start_sequence = torch.tensor(tokenizer.encode('Korea'), dtype=torch.long).unsqueeze(0).to(device)
 
-    #start_sequence = start_sequence.squeeze()
-    generated = generate_text(decoder, start_sequence, max_length=generate_max_length, device=device)
-    generated_text = tokenizer.decode(generated[0].tolist())
-    print("Generated text:", generated_text)    
+        #start_sequence = start_sequence.squeeze()
+        generated = generate_text(decoder, start_sequence, max_length=generate_max_length, device=device)
+        generated_text = tokenizer.decode(generated[0].tolist())
+        print("Generated text:", generated_text)   
+        model_path = "decoder_model.pth"
+        torch.save(decoder.state_dict(), model_path)
+        print(f"Model saved to {model_path}") 
+
+    elif part == "load_generation":
+        generate_embd = 256
+        generate_layer = 16
+        generate_head = 8
+        generate_hidden = 256
+        generate_max_length = 60
+        generate_max_iters = 1000
+
+        vocab_size = tokenizer.vocab_size
+        decoder = TransformerDecoder_Alibi(vocab_size=vocab_size, embed_size=generate_embd, num_layers=generate_layer, num_heads=generate_head, 
+                                     ff_hidden_dim=generate_hidden, dropout=0.2, max_length=generate_max_length).to(device)
+        model_path = "decoder_model.pth"
+        decoder.load_state_dict(torch.load(model_path))
+        decoder.eval()
+        start_sequence = torch.tensor(tokenizer.encode('hero'), dtype=torch.long).unsqueeze(0).to(device)
+        generated = generate_text(decoder, start_sequence, max_length=generate_max_length, device=device)
+        generated_text = tokenizer.decode(generated[0].tolist())
+        print("Generated text:", generated_text)
+
+
 
 
     
@@ -464,7 +488,7 @@ def main(part):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run specified part of the assignment")
-    parser.add_argument('--part', type=str, choices=['part1', 'part2', 'part3', 'generation'], required=True, help="Specify which part to run: 'part1' or 'part2' or 'part3'")
+    parser.add_argument('--part', type=str, choices=['part1', 'part2', 'part3', 'generation','load_generation'], required=True, help="Specify which part to run: 'part1' or 'part2' or 'part3'")
     args = parser.parse_args()
     
     main(args.part)
