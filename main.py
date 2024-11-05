@@ -156,6 +156,35 @@ def compute_perplexity(decoderLMmodel, data_loader, eval_iters=100):
     decoderLMmodel.train()
     return perplexity
 
+def compute_perplexity_dev(decoderLMmodel, data_loader, criterion, eval_iters=100):
+    """ Compute the perplexity of the decoderLMmodel on the data in data_loader.
+    """
+    decoderLMmodel.eval()
+    losses = []
+    
+    for i, (X, Y) in enumerate(data_loader):
+        if i >= eval_iters:  # Limit evaluation to a fixed number of iterations
+            break
+        
+        X, Y = X.to(device), Y.to(device)
+        trg_mask = create_target_mask(X)  # Create the target mask for the current batch
+        
+        # Forward pass through the model to get outputs
+        outputs = decoderLMmodel(X, trg_mask=trg_mask)  # Shape: (batch_size, seq_length, vocab_size)
+
+        # Reshape outputs and targets for calculating loss
+        loss = criterion(outputs.view(-1, outputs.size(-1)), Y.view(-1))
+        
+        # Append the loss for this batch to the list
+        losses.append(loss.item())
+    
+    # Calculate mean loss and perplexity
+    mean_loss = sum(losses) / len(losses)
+    perplexity = torch.exp(torch.tensor(mean_loss)).item()  # Calculate perplexity as exp(mean loss)
+
+    decoderLMmodel.train()  # Switch back to training mode
+    return perplexity
+
 def main(part):
 
     print("Loading data and creating tokenizer ...")
@@ -197,9 +226,28 @@ def main(part):
             lmtrainText = f.read()
         train_LM_dataset = LanguageModelingDataset(tokenizer, lmtrainText,  block_size)
         train_LM_loader = DataLoader(train_LM_dataset, batch_size=batch_size, shuffle=True)
+        
+        obamafile = "speechesdataset/test_LM_obama.txt"
+        with open(obamafile, 'r', encoding='utf-8') as f:
+            lmobamaText = f.read()
+        obama_LM_dataset = LanguageModelingDataset(tokenizer, lmobamaText, block_size)
+        obama_LM_loader = DataLoader(obama_LM_dataset, batch_size=batch_size, shuffle=True)
+
+        hbushfile = "speechesdataset/test_LM_hbush.txt"
+        with open(hbushfile, 'r', encoding='utf-8') as f:
+            lmhbushText = f.read()
+        hbush_LM_dataset = LanguageModelingDataset(tokenizer, lmhbushText, block_size)
+        hbush_LM_loader = DataLoader(hbush_LM_dataset, batch_size=batch_size, shuffle=True)
+
+        wbushfile = "speechesdataset/test_LM_wbush.txt"
+        with open(wbushfile, 'r', encoding='utf-8') as f:
+            lmwbushText = f.read()
+        wbush_LM_dataset = LanguageModelingDataset(tokenizer, lmwbushText, block_size)
+        wbush_LM_loader = DataLoader(wbush_LM_dataset, batch_size=batch_size, shuffle=True)
+
         vocab_size = tokenizer.vocab_size
         decoder = TransformerDecoder(vocab_size=vocab_size, embed_size=n_embd, num_layers=n_layer, num_heads=n_head, 
-                                     ff_hidden_dim=n_hidden, dropout=0.1, max_length=block_size).to(device)
+                                     ff_hidden_dim=n_hidden, dropout=0.04, max_length=block_size).to(device)
         optimizer = torch.optim.Adam(decoder.parameters(), lr=learning_rate)
         criterion = nn.CrossEntropyLoss()
         print("Starting decoder pretraining on language modeling task...")
@@ -230,8 +278,15 @@ def main(part):
             # Print training progress and evaluate perplexity at intervals
             if (i + 1) % eval_interval == 0 or i == max_iters - 1:
                 avg_loss = sum(train_losses[-eval_interval:]) / len(train_losses[-eval_interval:])
-                perplexity = torch.exp(torch.tensor(avg_loss))
-                print(f"Iteration {i + 1}/{max_iters} - Training Loss: {avg_loss:.4f} - Perplexity: {perplexity:.2f}")
+                current_loss = train_losses[-1]
+                perplexity = compute_perplexity_dev(decoder, train_LM_loader, criterion, eval_iters=eval_iters)
+                print(f"Iteration {i + 1}/{max_iters} - Training Loss: {current_loss:.4f} - Perplexity: {perplexity:.2f}")
+        final_perplexity = compute_perplexity_dev(decoder, train_LM_loader, criterion, eval_iters=eval_iters)
+        obama_perplexity = compute_perplexity_dev(decoder, obama_LM_loader, criterion, eval_iters=eval_iters)
+        hbush_perplexity = compute_perplexity_dev(decoder, hbush_LM_loader, criterion, eval_iters=eval_iters)
+        wbush_perplexity = compute_perplexity_dev(decoder, wbush_LM_loader, criterion, eval_iters=eval_iters)
+        print(f"Final Train Perplexity: {final_perplexity:.2f}")
+        print(f"At 500th iteration, Obama Perplexity: {obama_perplexity:.2f}, H. Bush Perplexity: {hbush_perplexity:.2f}, W. Bush Perplexity: {wbush_perplexity:.2f}")
         utilities = Utilities(tokenizer, decoder)
         sample_sentence = "This is a sample sentence to visualize attention maps, which is intentionally made around 32 words to see if the attention map works properly."
         utilities.sanity_check(sample_sentence, block_size=32, part1=False)

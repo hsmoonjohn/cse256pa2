@@ -164,18 +164,17 @@ class TransformerDecoderLayer(nn.Module):
     def forward(self, x, trg_mask, return_attention=False):
 
         if return_attention:
-            attention_out, attention = self.attention(x, x, x, trg_mask, return_attention=True)
-            query = self.dropout(self.norm1(attention_out + x))
-            forward = self.feed_forward(query)
-            out = self.dropout(self.norm2(forward + query))
-            return out, attention
+            attention_out, attention = self.attention(self.norm1(x), self.norm1(x), self.norm1(x), trg_mask, return_attention=True)
+            x = x + self.dropout(attention_out)
+            x = x + self.dropout(self.feed_forward(self.norm2(x)))
+            
+            return x, attention
 
         else:
-            attention = self.attention(x, x, x, trg_mask)
-            query = self.dropout(self.norm1(attention + x))
-            forward = self.feed_forward(query)
-            out = self.dropout(self.norm2(forward + query))
-            return out
+            attention_out = self.attention(self.norm1(x), self.norm1(x), self.norm1(x), trg_mask)
+            x = x + self.dropout(attention_out)
+            x = x + self.dropout(self.feed_forward(self.norm2(x)))
+            return x
 
 class TransformerDecoder(nn.Module):
     def __init__(self, vocab_size, embed_size, num_layers, num_heads, ff_hidden_dim, dropout, max_length):
@@ -188,11 +187,12 @@ class TransformerDecoder(nn.Module):
         self.fc_out = nn.Linear(embed_size, vocab_size)
         self.norm = nn.LayerNorm(embed_size)  # Additional normalization
         self.dropout = nn.Dropout(dropout)
+        self.embed_dim = embed_size
 
     def forward(self, x, trg_mask, return_attention=False):
         N, seq_length = x.shape
         positions = torch.arange(0, seq_length).expand(N, seq_length).to(x.device)
-        out = self.dropout(self.word_embedding(x) + self.position_embedding(positions))
+        out = self.dropout((self.word_embedding(x) + self.position_embedding(positions)))
         attention_maps = []
         
         for layer in self.layers:
@@ -208,3 +208,26 @@ class TransformerDecoder(nn.Module):
             return out, attention_maps
         else:
             return out
+        
+class AliBiBias(nn.Module):
+    def __init__(self, num_heads):
+        super(AliBiBias, self).__init__()
+        slopes = self._get_slopes(num_heads)
+        self.register_buffer('slopes', slopes)  # Register as buffer so it's persistent and moves to device with model
+
+    @staticmethod
+    def _get_slopes(num_heads):
+        def get_slopes_helper(n):
+            if n == 1:
+                return [1.]
+            else:
+                previous = get_slopes_helper(n // 2)
+                return previous + [2 * slope for slope in previous]
+        
+        slopes = get_slopes_helper(num_heads)
+        return torch.tensor(slopes, dtype=torch.float32).view(num_heads, 1, 1)  # Shape (num_heads, 1, 1)
+
+    def forward(self, seq_length):
+        position_ids = torch.arange(seq_length).unsqueeze(0) - torch.arange(seq_length).unsqueeze(1)
+        alibi = position_ids * self.slopes
+        return alibi
