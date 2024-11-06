@@ -239,6 +239,8 @@ def main(part):
             test_accuracy, test_loss = compute_classifier_accuracy(model, test_CLS_loader, criterion)
             print(f"Epoch {epoch+1}/{epochs_CLS}, Train Loss: {train_loss:.4f}, Test Loss: {test_loss:.4f}, Test Accuracy: {test_accuracy:.2f}%")
         # Initialize Utilities and run sanity check
+        test_accuracy, test_loss = compute_classifier_accuracy(model, test_CLS_loader, criterion)
+        print(f"Final Test Loss: {test_loss:.4f}, Final Test Accuracy: {test_accuracy:.2f}%")
         utilities = Utilities(tokenizer, model)
         sample_sentence = "This is a sample sentence to visualize attention maps, which is intentionally made around 32 words to see if the attention map works properly."
         utilities.sanity_check(sample_sentence, block_size=32)
@@ -275,7 +277,7 @@ def main(part):
 
         vocab_size = tokenizer.vocab_size
         decoder = TransformerDecoder(vocab_size=vocab_size, embed_size=n_embd, num_layers=n_layer, num_heads=n_head, 
-                                     ff_hidden_dim=n_hidden, dropout=0.04, max_length=block_size).to(device)
+                                     ff_hidden_dim=n_hidden, dropout=0.03, max_length=block_size).to(device)
         optimizer = torch.optim.Adam(decoder.parameters(), lr=learning_rate)
         criterion = nn.CrossEntropyLoss()
         print("Starting decoder pretraining on language modeling task...")
@@ -320,6 +322,8 @@ def main(part):
         utilities.sanity_check(sample_sentence, block_size=32, part='part2')
 
         print("Training complete.")
+        num_params = count_parameters(decoder)
+        print(f"Number of trainable parameters in the TransformerDecoder: {num_params}")
 
 
     elif part == "part3":
@@ -396,6 +400,8 @@ def main(part):
         utilities.sanity_check(sample_sentence, block_size=32, part='part3')
 
         print("Training complete.")
+        num_params = count_parameters(decoder)
+        print(f"Number of trainable parameters in the TransformerDecoder: {num_params}")
 
     elif part == "generation":
         
